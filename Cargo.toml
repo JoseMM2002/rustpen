@@ -1,0 +1,15 @@
+[package]
+name = "rustpen"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lazy_static = "1.5.0"
+signal-hook = "0.3.17"
+termion = "4.0.2"
+dirs = "5.0.1"
+fs_extra = "1.3.0"
+
+[build-dependencies]
+dirs = "5.0.1"
+fs_extra = "1.3.0"
