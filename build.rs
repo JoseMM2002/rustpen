@@ -8,7 +8,7 @@ use std::{env, fs};
 const CONFIG_FILE: &str = "config.toml";
 
 fn main() {
-    println!("cargo:rerun-if-changed=./{}", CONFIG_FILE);
+    println!("cargo:rerun-if-changed=build.rs");
 
     let current_dir_config = PathBuf::from(CONFIG_FILE);
     if !current_dir_config.exists() {
@@ -22,6 +22,13 @@ fn main() {
         fs::create_dir_all(&rustpen_config_dir)
             .expect("Failed to create ~/.config/rustpen directory");
         println!("cargo:warning=Created directory ~/.config/rustpen.");
+    }
+
+    let config_dir = "/tmp/rustpen_unix_socket/";
+
+    if !Path::new(&config_dir).exists() {
+        fs::create_dir_all(&config_dir).expect("Failed to create /tmp/rustpen_unix_socket/");
+        println!("cargo:warning=Created binding server in /tmp/rustpen_unix_socket/")
     }
 
     let destination_file = rustpen_config_dir.join(CONFIG_FILE);

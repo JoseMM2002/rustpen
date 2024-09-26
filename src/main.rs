@@ -128,7 +128,7 @@ fn main() {
 
     thread::spawn(move || {
         let server = UnixServer::new("/tmp/rustpen_unix_socket/ts");
-        server.start(tx_server);
+        server.start(tx_server, editor_server);
     });
 
     loop {
