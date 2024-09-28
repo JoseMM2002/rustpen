@@ -1,8 +1,12 @@
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
 use crate::{command::match_keys_command, editor::Editor};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub enum EditorMode {
     Visual,
     Insert,

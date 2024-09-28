@@ -1,5 +1,6 @@
-use std::io::Read;
-use std::os::unix::net::UnixListener;
+use server_messages::{ContextMessage, ServerMessages};
+use std::io::{Read, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self};
@@ -9,8 +10,16 @@ use std::{env, fs, thread};
 use crate::editor::Editor;
 use crate::EditorMessage;
 
+pub mod server_messages;
+
 pub struct UnixServer {
     socket_path: String,
+}
+
+pub fn send_message<T>(stream: &mut UnixStream, message: ServerMessages) {
+    let message_str = serde_json::to_vec_pretty(&message).unwrap();
+
+    stream.write_all(&message_str).unwrap();
 }
 
 impl UnixServer {
@@ -33,24 +42,31 @@ impl UnixServer {
         )))
         .unwrap();
 
-        thread::spawn(move || {
-            let shell_path = env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        // thread::spawn(move || {
+        //     let shell_path = env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
 
-            let home_dir = env::var("HOME").expect("HOME directory not found");
-            let config_dir = format!("{}/.config/rustpen/ts-plugins", home_dir);
+        //     let home_dir = env::var("HOME").expect("HOME directory not found");
+        //     let config_dir = format!("{}/.config/rustpen/ts-plugins", home_dir);
 
-            Command::new(&shell_path)
-                .current_dir(&config_dir)
-                .arg("-c")
-                .arg("npm start")
-                .stdout(Stdio::piped())
-                .status()
-                .unwrap();
-        });
+        //     Command::new(&shell_path)
+        //         .current_dir(&config_dir)
+        //         .arg("-c")
+        //         .arg("npm start")
+        //         .stdout(Stdio::piped())
+        //         .status()
+        //         .unwrap();
+        // });
 
         match listener.accept() {
             Ok((mut stream, _)) => {
                 let mut buffer = [0; 512];
+                let editor = editor_ref.lock().unwrap();
+                send_message::<ServerMessages>(
+                    &mut stream,
+                    ServerMessages::Context(ContextMessage {
+                        editor: editor.to_editor_context(),
+                    }),
+                );
                 loop {
                     match stream.read(&mut buffer) {
                         Ok(n) => {

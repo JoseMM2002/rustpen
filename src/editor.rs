@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::fmt::Write as FmtWrite;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write as IoWrite};
@@ -5,12 +6,26 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::usize;
 use std::{collections::HashMap, io::Stdout};
-use termion::color::Rgb;
 use termion::raw::RawTerminal;
 use termion::screen::AlternateScreen;
-use termion::{clear, color, cursor};
+use termion::{
+    clear,
+    color::{self, Rgb as TermionRgb},
+    cursor,
+};
+use ts_rs::TS;
 
 use crate::editor_modes::{EditorMode, ExecuteKey};
+
+#[derive(Deserialize, TS, Clone, Copy)]
+#[ts(export)]
+pub struct Rgb(pub u8, pub u8, pub u8);
+
+impl Rgb {
+    pub fn to_termion_rgb(self) -> TermionRgb {
+        TermionRgb(self.0, self.1, self.2)
+    }
+}
 
 #[derive(Clone)]
 pub enum CursorForm {
@@ -42,7 +57,24 @@ pub struct EditorCursor {
     pub form: CursorForm,
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditorCursorContext {
+    pub position: (u16, u16),
+}
+
+impl EditorCursor {
+    pub fn to_cursor_context(self) -> EditorCursorContext {
+        EditorCursorContext {
+            position: self.position,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct EditorWindow {
     pub start: (u16, u16),
     pub end: (u16, u16),
@@ -50,11 +82,23 @@ pub struct EditorWindow {
 
 pub type HandleKeysFn = Arc<dyn Fn(&mut Editor, &str) + Send + Sync>;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ColorRange {
     pub range: (u16, u16),
     pub bg_color: Option<Rgb>,
     pub fg_color: Option<Rgb>,
+}
+
+impl Serialize for Rgb {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let rgb = [self.0, self.1, self.2];
+        rgb.serialize(serializer)
+    }
 }
 
 #[derive(Clone)]
@@ -69,6 +113,18 @@ pub struct EditorBuffer {
     pub buffer_window: EditorWindow,
     pub handle_keys: HandleKeysFn,
     pub pivot: (u16, u16),
+    pub tab_width: u16,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditorBufferContext {
+    pub cursors: Vec<EditorCursorContext>,
+    pub content: Vec<String>,
+    pub colors: Vec<Vec<ColorRange>>,
+    pub memory: Vec<String>,
+    pub buffer_window: EditorWindow,
     pub tab_width: u16,
 }
 
@@ -151,6 +207,21 @@ impl EditorBuffer {
             ))
         }
     }
+
+    pub fn to_buffer_context(self) -> EditorBufferContext {
+        EditorBufferContext {
+            cursors: self
+                .cursors
+                .iter()
+                .map(|cursor| cursor.clone().to_cursor_context())
+                .collect(),
+            content: self.content.clone(),
+            colors: self.colors.clone(),
+            memory: self.memory.clone(),
+            buffer_window: self.buffer_window.clone(),
+            tab_width: self.tab_width,
+        }
+    }
 }
 
 pub struct Editor {
@@ -164,6 +235,18 @@ pub struct Editor {
     pub commands_hist: Vec<String>,
 
     stdout: AlternateScreen<RawTerminal<Stdout>>,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditorContext {
+    pub buffers: HashMap<String, EditorBufferContext>,
+    pub buffers_to_show: Vec<String>,
+    pub focus_buffer: String,
+    pub editor_mode: EditorMode,
+    pub terminal_size: (u16, u16),
+    pub commands_hist: Vec<String>,
 }
 
 pub type EditorFunctions = Box<dyn Fn(&mut Editor) + Sync + Send + 'static>;
@@ -214,6 +297,24 @@ impl Editor {
         self.close = true;
         write!(self.stdout, "{}{}", clear::All, cursor::Show).unwrap();
         self.stdout.flush().unwrap();
+    }
+
+    pub fn to_editor_context(&self) -> EditorContext {
+        let buffers = self.buffers.clone();
+        let mut buffers_context: HashMap<String, EditorBufferContext> = HashMap::new();
+
+        buffers.into_iter().for_each(|(key, buffer)| {
+            buffers_context.insert(key, buffer.to_buffer_context());
+        });
+
+        EditorContext {
+            buffers: buffers_context,
+            buffers_to_show: self.buffers_to_show.clone(),
+            focus_buffer: self.focus_buffer.clone(),
+            editor_mode: self.editor_mode.clone(),
+            terminal_size: self.terminal_size.clone(),
+            commands_hist: self.commands_hist.clone(),
+        }
     }
 
     pub fn render(&mut self, info: String) {
@@ -280,9 +381,11 @@ impl Editor {
                         if let Some(current) = current_color {
                             if j == current.range.0 as usize {
                                 let bg_color =
-                                    current.bg_color.unwrap_or(color::Rgb(100, 100, 100));
-                                let fg_color =
-                                    current.fg_color.unwrap_or(color::Rgb(255, 255, 255));
+                                    current.bg_color.unwrap_or(Rgb(0, 0, 0)).to_termion_rgb();
+                                let fg_color = current
+                                    .fg_color
+                                    .unwrap_or(Rgb(255, 255, 255))
+                                    .to_termion_rgb();
 
                                 if cursor_in_line
                                     .map_or(false, |cursor| cursor.position.0 == j as u16)
@@ -326,8 +429,8 @@ impl Editor {
                                 write!(
                                     render_buffer,
                                     "{}{}{}{}{}",
-                                    color::Fg(color::Rgb(0, 0, 0)),
-                                    color::Bg(color::Rgb(255, 255, 255)),
+                                    color::Fg(TermionRgb(0, 0, 0)),
+                                    color::Bg(TermionRgb(255, 255, 255)),
                                     ch,
                                     color::Bg(color::Reset),
                                     color::Fg(color::Reset)

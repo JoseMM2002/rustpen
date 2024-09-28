@@ -1,7 +1,5 @@
-use termion::color;
-
 use crate::{
-    editor::{ColorRange, Editor},
+    editor::{ColorRange, Editor, Rgb},
     editor_modes::EditorMode,
     insert::insert_chars_to_buffer,
     normal::{move_cursors, CursorDirections},
@@ -129,8 +127,8 @@ pub fn match_keys_insert(editor: &mut Editor, key: &str) {
             numeration_buffer.content.push(format!("{:>6} ", i + 1));
             numeration_buffer.colors.push(vec![ColorRange {
                 range: (0, 7),
-                bg_color: Some(color::Rgb(42, 42, 55)),
-                fg_color: Some(color::Rgb(84, 83, 108)),
+                bg_color: Some(Rgb(42, 42, 55)),
+                fg_color: Some(Rgb(84, 83, 108)),
             }]);
         }
     } else if current_lines > new_lines {

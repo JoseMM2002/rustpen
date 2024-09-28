@@ -1,5 +1,5 @@
 use rustpen::buffers::editor_buffer::match_editor_mode;
-use rustpen::editor::{ColorRange, Editor, EditorBuffer, EditorWindow};
+use rustpen::editor::{ColorRange, Editor, EditorBuffer, EditorWindow, Rgb};
 use rustpen::server::UnixServer;
 use rustpen::{key_to_string, EditorMessage};
 use signal_hook::consts::SIGWINCH;
@@ -11,7 +11,7 @@ use std::{env, thread};
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 use termion::screen::IntoAlternateScreen;
-use termion::{color, terminal_size};
+use termion::terminal_size;
 
 fn init_editor() -> Result<Editor, ()> {
     let stdout = stdout()
@@ -49,8 +49,8 @@ fn init_editor() -> Result<Editor, ()> {
         numerate_lines_content.push(format!("{:>6} ", i));
         numerate_lines_colors.push(vec![ColorRange {
             range: (0, 7),
-            bg_color: Some(color::Rgb(42, 42, 55)),
-            fg_color: Some(color::Rgb(84, 83, 108)),
+            bg_color: Some(Rgb(42, 42, 55)),
+            fg_color: Some(Rgb(84, 83, 108)),
         }]);
     }
 
@@ -87,6 +87,8 @@ fn main() {
     let editor_ref = Arc::new(Mutex::new(editor));
 
     let (tx, rx) = mpsc::channel::<EditorMessage>();
+
+    // let (tx_server, rx_server) = mpsc::channel();
 
     let editor_keys = Arc::clone(&editor_ref);
     let editor_resize = Arc::clone(&editor_ref);
