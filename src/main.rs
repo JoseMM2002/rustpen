@@ -1,4 +1,5 @@
-use rustpen::buffers::editor_buffer::match_editor_mode;
+use rustpen::buffers::editor_buffer;
+use rustpen::buffers::explorer_buffer::init_explorer_buffer;
 use rustpen::editor::{ColorRange, Editor, EditorBuffer, EditorWindow, Rgb};
 use rustpen::server::UnixServer;
 use rustpen::{key_to_string, EditorMessage};
@@ -16,11 +17,13 @@ use termion::terminal_size;
 fn init_editor() -> Result<Editor, ()> {
     let stdout = stdout()
         .into_raw_mode()
-        .unwrap()
+        .expect("Failed to enter raw mode")
         .into_alternate_screen()
-        .unwrap();
+        .expect("Failed to switch to alternate screen");
 
-    let mut editor = Editor::new(stdout);
+    let root = env::current_dir().unwrap().to_str().unwrap().to_string();
+
+    let mut editor = Editor::new(stdout, root.clone());
     let args: Vec<String> = env::args().collect();
     let terminal_size = editor.terminal_size.clone();
 
@@ -29,19 +32,51 @@ fn init_editor() -> Result<Editor, ()> {
         return Err(());
     }
 
-    let filename = &args[1];
+    let filename = if args.len() > 1 {
+        Some(args[1].clone())
+    } else {
+        None
+    };
 
-    let main_buffer = EditorBuffer::from_file(
-        filename,
-        Arc::new(|editor: &mut Editor, key: &str| match_editor_mode(editor, key)),
-        EditorWindow {
-            start: (9, 1),
-            end: (terminal_size.0, terminal_size.1 - 1),
+    let main_buffer = if let Some(filename) = filename.clone() {
+        if filename == "." {
+            init_explorer_buffer(&root, terminal_size)
+        } else {
+            EditorBuffer::from_file(
+                &filename,
+                Arc::new(|editor: &mut Editor, key: &str| {
+                    editor_buffer::match_editor_mode(editor, key)
+                }),
+                EditorWindow {
+                    start: (9, 1),
+                    end: (terminal_size.0, terminal_size.1 - 1),
+                },
+                4,
+            )
+        }
+    } else {
+        EditorBuffer::new(
+            Arc::new(|editor: &mut Editor, key: &str| {
+                editor_buffer::match_editor_mode(editor, key)
+            }),
+            EditorWindow {
+                start: (9, 1),
+                end: (terminal_size.0, terminal_size.1 - 1),
+            },
+            4,
+        )
+    };
+
+    let focus_buffer = match filename {
+        Some(filename) => match filename.as_str() {
+            "." => "explorer".to_string(),
+            _ => "main".to_string(),
         },
-        4,
-    );
+        None => "void".to_string(),
+    };
 
-    editor.add_buffer("main".to_string(), main_buffer.clone());
+    editor.add_buffer(focus_buffer.clone(), main_buffer.clone());
+
     let mut numerate_lines_content: Vec<String> = Vec::new();
     let mut numerate_lines_colors: Vec<Vec<ColorRange>> = Vec::new();
 
@@ -74,15 +109,14 @@ fn init_editor() -> Result<Editor, ()> {
         },
     );
 
-    editor.buffers_to_show = vec!["numerate_lines".to_string(), "main".to_string()];
-    editor.focus_buffer = "main".to_string();
+    editor.buffers_to_show = vec!["numerate_lines".to_string(), focus_buffer.clone()];
+    editor.focus_buffer = focus_buffer;
 
     Ok(editor)
 }
 
 fn main() {
-    let mut editor = init_editor().unwrap();
-    editor.render("Init".to_string());
+    let editor = init_editor().unwrap();
 
     let editor_ref = Arc::new(Mutex::new(editor));
 

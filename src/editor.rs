@@ -233,6 +233,7 @@ pub struct Editor {
     pub close: bool,
     pub terminal_size: (u16, u16),
     pub commands_hist: Vec<String>,
+    pub root: String,
 
     stdout: AlternateScreen<RawTerminal<Stdout>>,
 }
@@ -252,7 +253,7 @@ pub struct EditorContext {
 pub type EditorFunctions = Box<dyn Fn(&mut Editor) + Sync + Send + 'static>;
 
 impl Editor {
-    pub fn new(stdout: AlternateScreen<RawTerminal<Stdout>>) -> Self {
+    pub fn new(stdout: AlternateScreen<RawTerminal<Stdout>>, root: String) -> Self {
         Editor {
             buffers_to_show: vec![],
             buffers: HashMap::new(),
@@ -262,6 +263,7 @@ impl Editor {
             focus_buffer: String::new(),
             commands_hist: vec![],
             stdout,
+            root,
         }
     }
 
@@ -341,115 +343,97 @@ impl Editor {
                 let window_height =
                     (buffer.buffer_window.end.1 - buffer.buffer_window.start.1) as usize;
 
-                for (i, line) in buffer
-                    .content
-                    .iter()
-                    .enumerate()
-                    .skip(buffer.pivot.1 as usize)
-                    .take(window_height + 1)
-                {
-                    let cursor_y = buffer.buffer_window.start.1 + i as u16 - buffer.pivot.1;
+                let buffer_content = buffer.content.clone();
+                let buffer_colors = buffer.colors.clone();
+                let cursors = if buff_name == &editor.focus_buffer {
+                    buffer.cursors.clone()
+                } else {
+                    vec![]
+                };
+
+                for i in 0..window_height {
                     write!(
                         render_buffer,
-                        "{}",
-                        cursor::Goto(buffer.buffer_window.start.0, cursor_y)
-                    )
-                    .unwrap();
-
-                    let mut color_ranges: Vec<ColorRange> = vec![];
-
-                    if let Some(current_colors) = buffer.colors.get(i) {
-                        color_ranges = current_colors.to_vec();
-                    }
-
-                    let mut current_colors = color_ranges.iter();
-                    let mut current_color = current_colors.next();
-
-                    let cursor_in_line = buffer.cursors.iter().find(|&cursor| {
-                        cursor.position.1 as usize == i && editor_mode != EditorMode::Command
-                    });
-
-                    let mut line_plus_cursor = line.clone();
-                    line_plus_cursor.push(' ');
-
-                    for (j, ch) in line_plus_cursor
-                        .chars()
-                        .enumerate()
-                        .skip(buffer.pivot.0 as usize)
-                        .take(window_width + 1 as usize)
-                    {
-                        if let Some(current) = current_color {
-                            if j == current.range.0 as usize {
-                                let bg_color =
-                                    current.bg_color.unwrap_or(Rgb(0, 0, 0)).to_termion_rgb();
-                                let fg_color = current
-                                    .fg_color
-                                    .unwrap_or(Rgb(255, 255, 255))
-                                    .to_termion_rgb();
-
-                                if cursor_in_line
-                                    .map_or(false, |cursor| cursor.position.0 == j as u16)
-                                {
-                                    write!(
-                                        render_buffer,
-                                        "{}{}{}{}{}",
-                                        color::Fg(bg_color),
-                                        color::Bg(fg_color),
-                                        ch,
-                                        color::Fg(fg_color),
-                                        color::Bg(bg_color)
-                                    )
-                                    .unwrap();
-                                } else {
-                                    write!(
-                                        render_buffer,
-                                        "{}{}{}",
-                                        color::Fg(bg_color),
-                                        color::Bg(fg_color),
-                                        ch
-                                    )
-                                    .unwrap();
-                                }
-                            } else if j == current.range.1 as usize {
-                                write!(
-                                    render_buffer,
-                                    "{}{}{}",
-                                    ch,
-                                    color::Bg(color::Reset),
-                                    color::Fg(color::Reset)
-                                )
-                                .unwrap();
-                                current_color = current_colors.next();
-                            } else {
-                                write!(render_buffer, "{}", ch).unwrap();
-                            }
-                        } else {
-                            if cursor_in_line.map_or(false, |cursor| cursor.position.0 == j as u16)
-                            {
-                                write!(
-                                    render_buffer,
-                                    "{}{}{}{}{}",
-                                    color::Fg(TermionRgb(0, 0, 0)),
-                                    color::Bg(TermionRgb(255, 255, 255)),
-                                    ch,
-                                    color::Bg(color::Reset),
-                                    color::Fg(color::Reset)
-                                )
-                                .unwrap()
-                            } else {
-                                write!(render_buffer, "{}", ch).unwrap();
-                            }
-                        }
-                    }
-
-                    write!(
-                        render_buffer,
-                        "{}{}",
+                        "{}{}{}",
+                        cursor::Goto(
+                            buffer.buffer_window.start.0,
+                            buffer.buffer_window.start.1 + i as u16
+                        ),
                         color::Bg(color::Reset),
                         color::Fg(color::Reset)
                     )
                     .unwrap();
+                    let line = buffer_content
+                        .get(i + buffer.pivot.1 as usize)
+                        .unwrap_or(&"".to_string())
+                        .clone();
+                    let line_colors = buffer_colors.get(i).unwrap_or(&vec![]).clone();
+                    let cursor = cursors.iter().find(|cursor| cursor.position.1 == i as u16);
+
+                    let current_color = line_colors
+                        .iter()
+                        .find(|color_range| color_range.range.0 <= 0 && color_range.range.1 > 0);
+
+                    for j in 0..window_width {
+                        let char = line.chars().nth(j + buffer.pivot.0 as usize).unwrap_or(' ');
+
+                        match current_color {
+                            Some(color) => {
+                                if color.range.0 == j as u16 {
+                                    write!(
+                                        render_buffer,
+                                        "{}{}",
+                                        color::Bg(color.bg_color.unwrap().to_termion_rgb()),
+                                        color::Fg(color.fg_color.unwrap().to_termion_rgb())
+                                    )
+                                    .unwrap();
+                                } else if color.range.1 == j as u16 {
+                                    write!(
+                                        render_buffer,
+                                        "{}{}",
+                                        color::Bg(color::Reset),
+                                        color::Fg(color::Reset)
+                                    )
+                                    .unwrap();
+                                } else if let Some(cursor) = cursor {
+                                    if cursor.position.0 == j as u16 {
+                                        write!(
+                                            render_buffer,
+                                            "{}{}",
+                                            color::Bg(color.fg_color.unwrap().to_termion_rgb()),
+                                            color::Fg(color.bg_color.unwrap().to_termion_rgb())
+                                        )
+                                        .unwrap();
+                                        write!(render_buffer, "{}", cursor.form.to_char()).unwrap();
+                                    } else {
+                                        write!(render_buffer, "{}", char).unwrap();
+                                    }
+                                } else {
+                                    write!(render_buffer, "{}", char).unwrap();
+                                }
+                            }
+                            None => {
+                                if let Some(cursor) = cursor {
+                                    if cursor.position.0 == j as u16 {
+                                        write!(render_buffer, "{}", cursor.form.to_char()).unwrap();
+                                    } else {
+                                        write!(render_buffer, "{}", char).unwrap();
+                                    }
+                                } else {
+                                    write!(render_buffer, "{}", char).unwrap();
+                                }
+                            }
+                        }
+                    }
                 }
+
+                write!(
+                    render_buffer,
+                    "{}{}",
+                    color::Bg(color::Reset),
+                    color::Fg(color::Reset)
+                )
+                .unwrap();
             }
         }
 
